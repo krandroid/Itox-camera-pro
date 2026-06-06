@@ -1,0 +1,6 @@
+{
+  "name": "Dual Camera",
+  "description": "A dual camera recording and photography app.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
