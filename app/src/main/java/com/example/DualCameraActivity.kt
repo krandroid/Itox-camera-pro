@@ -55,6 +55,7 @@ class DualCameraActivity : AppCompatActivity(), TextureView.SurfaceTextureListen
     private var mediaMuxer: MediaMuxer? = null
     private var muxerStarted = false
     private var trackIndex = -1
+    private var recordingInputSurface: Surface? = null
 
     // Overlay
     private var frontX = 0.7f
@@ -213,12 +214,12 @@ class DualCameraActivity : AppCompatActivity(), TextureView.SurfaceTextureListen
             override fun run() {
                 if (glRenderer == null) return
                 
-                if (backFrameReady) {
+                if (backFrameReady && backTexture != null) {
                     try { backTexture?.updateTexImage() } catch (_: Exception) {}
                     backFrameReady = false
                 }
                 
-                if (frontFrameReady) {
+                if (frontFrameReady && frontTexture != null) {
                     try { frontTexture?.updateTexImage() } catch (_: Exception) {}
                     frontFrameReady = false
                 }
@@ -227,7 +228,7 @@ class DualCameraActivity : AppCompatActivity(), TextureView.SurfaceTextureListen
                 glRenderer?.drawFrame(
                     backTexture, frontTexture,
                     frontX, frontY, frontW, frontH, isCircle,
-                    mediaCodec?.createInputSurface()
+                    recordingInputSurface
                 )
                 eglHandler?.postDelayed(this, 30) // 30fps
             }
@@ -306,6 +307,7 @@ class DualCameraActivity : AppCompatActivity(), TextureView.SurfaceTextureListen
                     setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
                 }
                 mediaCodec!!.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+                recordingInputSurface = mediaCodec!!.createInputSurface()
                 mediaCodec!!.start()
 
                 mediaMuxer = MediaMuxer(outputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
@@ -324,6 +326,7 @@ class DualCameraActivity : AppCompatActivity(), TextureView.SurfaceTextureListen
                 if (!isRecording.get()) {
                     mediaCodec?.stop(); mediaCodec?.release(); mediaCodec = null
                     mediaMuxer?.stop(); mediaMuxer?.release(); mediaMuxer = null
+                    recordingInputSurface = null
                     runOnUiThread { binding.btnCapture.setImageResource(R.drawable.ic_video) }
                     return
                 }
@@ -354,6 +357,7 @@ class DualCameraActivity : AppCompatActivity(), TextureView.SurfaceTextureListen
 
     private fun stopRecording() {
         isRecording.set(false)
+        recordingInputSurface = null
         runOnUiThread { Toast.makeText(this, "Video disimpan", Toast.LENGTH_SHORT).show() }
     }
 
