@@ -118,6 +118,11 @@ class DualCameraGLRenderer {
         GLES20.glDisableVertexAttribArray(posLoc)
         GLES20.glDisableVertexAttribArray(texLoc)
         GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0)
+        
+        val error = GLES20.glGetError()
+        if (error != GLES20.GL_NO_ERROR) {
+            android.util.Log.e("DualCameraGL", "GL Error: $error")
+        }
     }
 
     fun captureFrame(): Bitmap? {

@@ -27,7 +27,7 @@ class DualCameraActivity : AppCompatActivity(), TextureView.SurfaceTextureListen
 
     private lateinit var binding: ActivityDualCameraBinding
     private val cameraExecutor = Executors.newSingleThreadExecutor()
-    private lateinit var cameraProvider: ProcessCameraProvider
+    private var cameraProvider: ProcessCameraProvider? = null
 
     // OpenGL
     private var glRenderer: DualCameraGLRenderer? = null
@@ -39,16 +39,12 @@ class DualCameraActivity : AppCompatActivity(), TextureView.SurfaceTextureListen
     private var frontTexture: SurfaceTexture? = null
     private var backSurface: Surface? = null
     private var frontSurface: Surface? = null
-    private var backTextureId = 0
-    private var frontTextureId = 0
     private var backResolution = Size(1920, 1080)
     private var frontResolution = Size(1280, 720)
 
     // Frame flags
     private var backFrameReady = false
     private var frontFrameReady = false
-    private var backReleased = false
-    private var frontReleased = false
 
     // Mode
     private var isPhotoMode = true
@@ -66,6 +62,8 @@ class DualCameraActivity : AppCompatActivity(), TextureView.SurfaceTextureListen
     private var frontW = 0.25f
     private var frontH = 0.25f
     private var isCircle = true
+    
+    private var permissionsGranted = false
 
     // Render loop
     private var renderRunnable: Runnable? = null
@@ -90,17 +88,25 @@ class DualCameraActivity : AppCompatActivity(), TextureView.SurfaceTextureListen
         val missing = perms.filter {
             ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
         }
-        if (missing.isEmpty()) initCamera()
-        else ActivityCompat.requestPermissions(this, missing.toTypedArray(), 100)
+        if (missing.isEmpty()) {
+            permissionsGranted = true
+            tryStartCamera()
+        } else {
+            ActivityCompat.requestPermissions(this, missing.toTypedArray(), 100)
+        }
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == 100 && grantResults.all { it == PackageManager.PERMISSION_GRANTED }) initCamera()
-        else Toast.makeText(this, "Izin diperlukan", Toast.LENGTH_LONG).show()
+        if (requestCode == 100 && grantResults.all { it == PackageManager.PERMISSION_GRANTED }) {
+            permissionsGranted = true
+            tryStartCamera()
+        } else Toast.makeText(this, "Izin diperlukan", Toast.LENGTH_LONG).show()
     }
-
-    private fun initCamera() {
+    
+    private fun tryStartCamera() {
+        if (!permissionsGranted || glRenderer == null) return
+        
         val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
         cameraProviderFuture.addListener({
             cameraProvider = cameraProviderFuture.get()
@@ -109,7 +115,8 @@ class DualCameraActivity : AppCompatActivity(), TextureView.SurfaceTextureListen
     }
 
     private fun bindUseCases() {
-        cameraProvider.unbindAll()
+        val provider = cameraProvider ?: return
+        provider.unbindAll()
 
         val previewBack = Preview.Builder()
             .setResolutionSelector(resolution(backResolution))
@@ -117,17 +124,13 @@ class DualCameraActivity : AppCompatActivity(), TextureView.SurfaceTextureListen
             .apply {
                 setSurfaceProvider { request ->
                     eglHandler?.post {
-                        backReleased = false
-                        backTextureId = glRenderer?.createTexture() ?: return@post
-                        backTexture = SurfaceTexture(backTextureId).apply {
+                        val texId = glRenderer?.createTexture() ?: return@post
+                        backTexture = SurfaceTexture(texId).apply {
                             setDefaultBufferSize(backResolution.width, backResolution.height)
-                            setOnFrameAvailableListener {
-                                if (!backReleased) backFrameReady = true
-                            }
+                            setOnFrameAvailableListener { backFrameReady = true }
                         }
                         backSurface = Surface(backTexture)
-                        request.provideSurface(backSurface!!, { command -> eglHandler?.post(command!!) }) {
-                            backReleased = true
+                        request.provideSurface(backSurface!!, { command -> eglHandler?.post(command) }) {
                             backSurface?.release()
                             backSurface = null
                             backTexture?.release()
@@ -144,17 +147,13 @@ class DualCameraActivity : AppCompatActivity(), TextureView.SurfaceTextureListen
             .apply {
                 setSurfaceProvider { request ->
                     eglHandler?.post {
-                        frontReleased = false
-                        frontTextureId = glRenderer?.createTexture() ?: return@post
-                        frontTexture = SurfaceTexture(frontTextureId).apply {
+                        val texId = glRenderer?.createTexture() ?: return@post
+                        frontTexture = SurfaceTexture(texId).apply {
                             setDefaultBufferSize(frontResolution.width, frontResolution.height)
-                            setOnFrameAvailableListener {
-                                if (!frontReleased) frontFrameReady = true
-                            }
+                            setOnFrameAvailableListener { frontFrameReady = true }
                         }
                         frontSurface = Surface(frontTexture)
-                        request.provideSurface(frontSurface!!, { command -> eglHandler?.post(command!!) }) {
-                            frontReleased = true
+                        request.provideSurface(frontSurface!!, { command -> eglHandler?.post(command) }) {
                             frontSurface?.release()
                             frontSurface = null
                             frontTexture?.release()
@@ -167,7 +166,6 @@ class DualCameraActivity : AppCompatActivity(), TextureView.SurfaceTextureListen
 
         try {
             // ⚡ Binding dua kamera sekaligus
-            val cameraProvider = cameraProvider
             val backConfig = androidx.camera.core.ConcurrentCamera.SingleCameraConfig(
                 CameraSelector.DEFAULT_BACK_CAMERA,
                 androidx.camera.core.UseCaseGroup.Builder().addUseCase(previewBack).build(),
@@ -178,11 +176,11 @@ class DualCameraActivity : AppCompatActivity(), TextureView.SurfaceTextureListen
                 androidx.camera.core.UseCaseGroup.Builder().addUseCase(previewFront).build(),
                 this
             )
-            cameraProvider.bindToLifecycle(listOf(backConfig, frontConfig))
+            provider.bindToLifecycle(listOf(backConfig, frontConfig))
         } catch (e: Exception) {
             Toast.makeText(this, "Dual camera tidak didukung: ${e.message}", Toast.LENGTH_LONG).show()
             try {
-                cameraProvider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, previewBack)
+                provider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, previewBack)
             } catch (e2: Exception) {
                 // Ignore fallback error
             }
@@ -195,15 +193,17 @@ class DualCameraActivity : AppCompatActivity(), TextureView.SurfaceTextureListen
 
     // TextureView Listener
     override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
-        glRenderer = DualCameraGLRenderer()
-        glRenderer?.init(surface, width, height)
-        startRenderLoop()
+        eglHandler?.post {
+            glRenderer = DualCameraGLRenderer().apply { init(surface, width, height) }
+            runOnUiThread { tryStartCamera() }
+            startRenderLoop()
+        }
         setupButtons()
     }
     override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {}
     override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
         stopRenderLoop()
-        glRenderer?.release()
+        eglHandler?.post { glRenderer?.release() }
         return true
     }
     override fun onSurfaceTextureUpdated(surface: SurfaceTexture) {}
@@ -213,24 +213,14 @@ class DualCameraActivity : AppCompatActivity(), TextureView.SurfaceTextureListen
             override fun run() {
                 if (glRenderer == null) return
                 
-                // Update tekstur belakang
-                if (backFrameReady && backTexture != null && !backReleased) {
-                    try {
-                        backTexture?.updateTexImage()
-                        backFrameReady = false
-                    } catch (e: Exception) {
-                        backFrameReady = false
-                    }
+                if (backFrameReady) {
+                    try { backTexture?.updateTexImage() } catch (_: Exception) {}
+                    backFrameReady = false
                 }
                 
-                // Update tekstur depan
-                if (frontFrameReady && frontTexture != null && !frontReleased) {
-                    try {
-                        frontTexture?.updateTexImage()
-                        frontFrameReady = false
-                    } catch (e: Exception) {
-                        frontFrameReady = false
-                    }
+                if (frontFrameReady) {
+                    try { frontTexture?.updateTexImage() } catch (_: Exception) {}
+                    frontFrameReady = false
                 }
 
                 // Render
@@ -271,21 +261,13 @@ class DualCameraActivity : AppCompatActivity(), TextureView.SurfaceTextureListen
     private fun takePhoto() {
         eglHandler?.post {
             // Ambil frame terbaru
-            if (backFrameReady && backTexture != null && !backReleased) {
-                try {
-                    backTexture?.updateTexImage()
-                    backFrameReady = false
-                } catch (e: Exception) {
-                    backFrameReady = false
-                }
+            if (backFrameReady) {
+                try { backTexture?.updateTexImage() } catch (_: Exception) {}
+                backFrameReady = false
             }
-            if (frontFrameReady && frontTexture != null && !frontReleased) {
-                try {
-                    frontTexture?.updateTexImage()
-                    frontFrameReady = false
-                } catch (e: Exception) {
-                    frontFrameReady = false
-                }
+            if (frontFrameReady) {
+                try { frontTexture?.updateTexImage() } catch (_: Exception) {}
+                frontFrameReady = false
             }
             val bitmap = glRenderer?.captureFrame()
             bitmap?.let { savePhoto(it) }
@@ -393,7 +375,7 @@ class DualCameraActivity : AppCompatActivity(), TextureView.SurfaceTextureListen
                     0 -> { backResolution = Size(3840, 2160); frontResolution = Size(1920, 1080) }
                     1 -> { backResolution = Size(1920, 1080); frontResolution = Size(1280, 720) }
                 }
-                initCamera()
+                tryStartCamera()
             }
         }.show()
     }
