@@ -109,8 +109,7 @@ class DualCameraActivity : AppCompatActivity(), TextureView.SurfaceTextureListen
     private fun bindUseCases() {
         cameraProvider.unbindAll()
 
-        // Preview belakang
-        Preview.Builder()
+        val previewBack = Preview.Builder()
             .setResolutionSelector(resolution(backResolution))
             .build()
             .apply {
@@ -131,10 +130,8 @@ class DualCameraActivity : AppCompatActivity(), TextureView.SurfaceTextureListen
                     }
                 }
             }
-            .also { cameraProvider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, it) }
 
-        // Preview depan
-        Preview.Builder()
+        val previewFront = Preview.Builder()
             .setResolutionSelector(resolution(frontResolution))
             .build()
             .apply {
@@ -155,7 +152,29 @@ class DualCameraActivity : AppCompatActivity(), TextureView.SurfaceTextureListen
                     }
                 }
             }
-            .also { cameraProvider.bindToLifecycle(this, CameraSelector.DEFAULT_FRONT_CAMERA, it) }
+
+        try {
+            // ⚡ Binding dua kamera sekaligus
+            val cameraProvider = cameraProvider
+            val backConfig = androidx.camera.core.ConcurrentCamera.SingleCameraConfig(
+                CameraSelector.DEFAULT_BACK_CAMERA,
+                androidx.camera.core.UseCaseGroup.Builder().addUseCase(previewBack).build(),
+                this
+            )
+            val frontConfig = androidx.camera.core.ConcurrentCamera.SingleCameraConfig(
+                CameraSelector.DEFAULT_FRONT_CAMERA,
+                androidx.camera.core.UseCaseGroup.Builder().addUseCase(previewFront).build(),
+                this
+            )
+            cameraProvider.bindToLifecycle(listOf(backConfig, frontConfig))
+        } catch (e: Exception) {
+            Toast.makeText(this, "Dual camera tidak didukung: ${e.message}", Toast.LENGTH_LONG).show()
+            try {
+                cameraProvider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, previewBack)
+            } catch (e2: Exception) {
+                // Ignore fallback error
+            }
+        }
     }
 
     private fun resolution(size: Size) = androidx.camera.core.resolutionselector.ResolutionSelector.Builder()
