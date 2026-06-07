@@ -80,6 +80,7 @@ dependencies {
   implementation(libs.androidx.camera.core)
   implementation(libs.androidx.camera.lifecycle)
   implementation(libs.androidx.camera.view)
+  implementation("androidx.camera:camera-video:1.5.0")
   implementation(libs.androidx.compose.material.icons.core)
   // implementation(libs.androidx.compose.material.icons.extended)
   implementation(libs.androidx.compose.material3)
